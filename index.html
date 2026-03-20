@@ -324,28 +324,40 @@
 
                                     const row = worksheet.addRow(sortedHeaders);
                                     row.eachCell(cell => { 
-                                        cell.font = { name: 'Calibri', size: 11, bold: true }; 
+                                        cell.font = { name: 'Calibri', size: 11 }; // <--- REMOVED BOLD HERE
                                     });
                                 }
                             } else {
-                                // TRIM & CLEAN the SKU if the column exists
+                                // ONLY trim the SKU if the column exists
                                 if (skuOriginalIndex !== -1 && rowData[skuOriginalIndex] !== undefined) {
-                                    let rawSku = rowData[skuOriginalIndex];
+                                    rowData[skuOriginalIndex] = rowData[skuOriginalIndex].trim();
                                     
-                                    // CLEAN: removes non-printable ASCII characters (like \x00 to \x1F)
-                                    // TRIM: replaces multiple spaces with a single space, then trims trailing/leading edges
-                                    let cleanTrimSku = rawSku.replace(/[\x00-\x1F\x7F]/g, '').replace(/\s+/g, ' ').trim();
-                                    
-                                    rowData[skuOriginalIndex] = cleanTrimSku; // reassign the cleaned value back to row data
-
-                                    if (cleanTrimSku !== "") {
+                                    if (rowData[skuOriginalIndex] !== "") {
                                         validSkuCount++; // Count valid SKUs
                                     }
                                 }
 
-                                const reorderedData = headerMapping.map(oldIndex => rowData[oldIndex] !== undefined ? rowData[oldIndex] : "");
+                                const reorderedData = headerMapping.map(oldIndex => {
+                                    let val = rowData[oldIndex] !== undefined ? rowData[oldIndex] : "";
+                                    
+                                    // Make numbers remain as numbers in Excel
+                                    if (val.trim() !== "" && !isNaN(val)) {
+                                        // Prevent parsing strings with leading zeros (like UPCs) into numbers
+                                        if (!/^0\d+/.test(val)) {
+                                            return Number(val);
+                                        }
+                                    }
+                                    return val;
+                                });
+
                                 const row = worksheet.addRow(reorderedData);
-                                row.eachCell(cell => { cell.font = { name: 'Calibri', size: 11 }; });
+                                row.eachCell(cell => { 
+                                    cell.font = { name: 'Calibri', size: 11 }; 
+                                    // Force text format for all non-number strings
+                                    if (typeof cell.value === 'string') {
+                                        cell.numFmt = '@';
+                                    }
+                                });
                             }
                         }
                     });

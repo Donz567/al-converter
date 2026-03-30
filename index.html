@@ -204,6 +204,7 @@
 
         // --- AUTO EXTRACTION LOGIC ---
         async function handleFiles(files) {
+            // Take a snapshot so browser doesn't clear DataTransfer memory
             const filesArray = Array.from(files);
 
             for (let i = 0; i < filesArray.length; i++) {
@@ -259,22 +260,27 @@
             e.preventDefault(); e.stopPropagation();
             dropZone.classList.add('border-indigo-400', 'bg-indigo-50/80', 'scale-[1.02]');
         });
+
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault(); e.stopPropagation();
             dropZone.classList.add('border-indigo-400', 'bg-indigo-50/80', 'scale-[1.02]');
         });
+
         dropZone.addEventListener('dragleave', (e) => {
             e.preventDefault(); e.stopPropagation();
             dropZone.classList.remove('border-indigo-400', 'bg-indigo-50/80', 'scale-[1.02]');
         });
+
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault(); e.stopPropagation();
             dropZone.classList.remove('border-indigo-400', 'bg-indigo-50/80', 'scale-[1.02]');
+            
             if (e.dataTransfer && e.dataTransfer.files.length > 0) {
                 handleFiles(e.dataTransfer.files);
             }
         });
 
+        // --- CONVERSION LOGIC & COLUMN FIXING ---
         function getFormattedTime() {
             const now = new Date();
             const estDate = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
@@ -288,7 +294,6 @@
             return `${hoursStr}${minutesStr} ${ampm} EST`;
         }
 
-        // --- MASTER CONVERSION LOGIC ---
         convertBtn.addEventListener('click', async () => {
             // Validation
             let allFilled = true;
@@ -324,6 +329,7 @@
                         
                         const workbook = new ExcelJS.Workbook();
                         const worksheet = workbook.addWorksheet('Listings');
+                        worksheet.views = [{ state: 'frozen', ySplit: 1 }];
 
                         const text = await file.text();
                         const lines = text.split(/\r?\n/);
@@ -364,7 +370,7 @@
                                         let val = rowData[oldIndex] !== undefined ? rowData[oldIndex] : "";
                                         let colName = masterColumnLayout[newIndex];
                                         
-                                        if (colName === 'seller-sku' || colName === 'asin1' || colName === 'product-id' || colName === 'listing-id') {
+                                        if (colName === 'seller-sku') {
                                             return String(val);
                                         }
                                         if (val !== "" && !isNaN(val)) {
@@ -374,9 +380,11 @@
                                     });
 
                                     const row = worksheet.addRow(reorderedData);
-                                    row.eachCell(cell => { 
+                                    row.eachCell((cell, colNumber) => { 
                                         cell.font = { name: 'Calibri', size: 11 }; 
-                                        if (typeof cell.value === 'string') cell.numFmt = '@'; 
+                                        if (masterColumnLayout[colNumber - 1] === 'seller-sku') {
+                                            cell.numFmt = '@';
+                                        } 
                                     });
                                 }
                             }
@@ -424,6 +432,8 @@
                         }
 
                         const worksheet = workbook.addWorksheet(safeTabName);
+                        worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+
                         const text = await file.text();
                         const lines = text.split(/\r?\n/);
                         
@@ -462,7 +472,7 @@
                                         let val = rowData[oldIndex] !== undefined ? rowData[oldIndex] : "";
                                         let colName = masterColumnLayout[newIndex];
                                         
-                                        if (colName === 'seller-sku' || colName === 'asin1' || colName === 'product-id' || colName === 'listing-id') {
+                                        if (colName === 'seller-sku') {
                                             return String(val);
                                         }
                                         if (val !== "" && !isNaN(val)) {
@@ -472,9 +482,11 @@
                                     });
 
                                     const row = worksheet.addRow(reorderedData);
-                                    row.eachCell(cell => { 
+                                    row.eachCell((cell, colNumber) => { 
                                         cell.font = { name: 'Calibri', size: 11 }; 
-                                        if (typeof cell.value === 'string') cell.numFmt = '@'; 
+                                        if (masterColumnLayout[colNumber - 1] === 'seller-sku') {
+                                            cell.numFmt = '@';
+                                        } 
                                     });
                                 }
                             }

@@ -6,6 +6,7 @@
     <title>Amazon Listing to Excel Converter</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -66,10 +67,10 @@
                                 </span>
                                 <span>or drag and drop</span>
                             </div>
-                            <p class="text-xs text-gray-400 font-medium">Bulk .txt files perfectly supported</p>
+                            <p class="text-xs text-gray-400 font-medium">Folders, .zip, and .txt files supported</p>
                         </div>
                     </div>
-                    <input id="fileInput" type="file" class="hidden" accept=".txt" multiple>
+                    <input id="fileInput" type="file" class="hidden" accept=".txt,.zip" multiple>
                 </div>
 
                 <div id="fileListContainer" class="hidden space-y-3">
@@ -127,25 +128,35 @@
             "status", "minimum-seller-allowed-price", "maximum-seller-allowed-price"
         ];
 
+        // --- MASTER BRAND LIST ---
+        const KNOWN_BRANDS = [
+            "Evenflo", "Wonderfold", "Cole Haan", "Invirox", "Boppy", 
+            "Arm's Reach", "Arm’s Reach", "Arms Reach", "Vertx", "Sebago", 
+            "Moon Boots", "Moon Boot", "Fieldsheer", "Heartland Footwear", 
+            "USCAPE", "Safetyshirtz", "Superga", "Scientific Anglers", 
+            "Tru - Spec", "Tru-Spec", "Hultafors - HGNA", "Hultafors", 
+            "Groundies", "Bumbleride", "Hootenanny Games", "Shurhold", 
+            "Turtle Fur", "Riedell", "Cloud Nine Sheepskin", "Wohali", 
+            "Walker & Hawkes", "Dinair", "Trenditions"
+        ];
+
         // --- MODE TOGGLE LOGIC ---
         window.setMode = function(mode) {
             currentMode = mode;
             if (mode === 'individual') {
-                // UI changes for Individual
                 btnIndividual.className = "flex-1 py-2.5 text-sm font-bold rounded-lg transition-all duration-300 shadow-sm bg-white text-indigo-600 relative z-10";
                 btnMerge.className = "flex-1 py-2.5 text-sm font-bold rounded-lg transition-all duration-300 text-gray-500 hover:text-indigo-400 relative z-10";
                 modeDescription.innerHTML = "Converts each uploaded <span class='font-bold text-indigo-500'>.txt file</span> into its own separate <span class='font-bold text-emerald-500'>.xlsx file</span>.";
                 fileListTitle.textContent = "Selected Files";
                 convertBtnText.textContent = "Convert & Download Individual .xlsx";
             } else {
-                // UI changes for Merge
                 btnMerge.className = "flex-1 py-2.5 text-sm font-bold rounded-lg transition-all duration-300 shadow-sm bg-white text-indigo-600 relative z-10";
                 btnIndividual.className = "flex-1 py-2.5 text-sm font-bold rounded-lg transition-all duration-300 text-gray-500 hover:text-indigo-400 relative z-10";
                 modeDescription.innerHTML = "Combines all uploaded <span class='font-bold text-indigo-500'>.txt files</span> into one single <span class='font-bold text-emerald-500'>.xlsx workbook</span> (each file on a separate tab).";
                 fileListTitle.textContent = "Selected Files (Will become Tabs)";
                 convertBtnText.textContent = "Merge & Download Single .xlsx";
             }
-            renderFileList(); // Re-render to update placeholders
+            renderFileList(); 
         }
 
         // --- UI UPDATES ---
@@ -202,48 +213,94 @@
             renderFileList();
         };
 
-        // --- AUTO EXTRACTION LOGIC ---
-        async function handleFiles(files) {
-            // Take a snapshot so browser doesn't clear DataTransfer memory
-            const filesArray = Array.from(files);
-
-            for (let i = 0; i < filesArray.length; i++) {
-                const file = filesArray[i];
-                let extractedBrand = '';
+        // Helper function to extract Brand from text content using Master List
+        async function extractBrand(text) {
+            let extractedBrand = '';
+            try {
+                const lines = text.split(/\r?\n/);
+                let nameColIndex = -1;
+                let dataStartRow = -1;
                 
-                try {
-                    const text = await file.text();
-                    const lines = text.split(/\r?\n/);
-                    
-                    let nameColIndex = -1;
-                    let dataStartRow = -1;
-                    
-                    for (let row = 0; row < Math.min(lines.length, 5); row++) {
-                        const columns = lines[row].split('\t').map(col => col.toLowerCase().trim());
-                        nameColIndex = columns.findIndex(col => 
-                            col.includes('item-name') || col.includes('item name') || col.includes('product name') || col === 'title'
-                        );
-                        if (nameColIndex !== -1) {
-                            dataStartRow = row + 1; 
-                            break;
+                for (let row = 0; row < Math.min(lines.length, 5); row++) {
+                    const columns = lines[row].split('\t').map(col => col.toLowerCase().trim());
+                    nameColIndex = columns.findIndex(col => 
+                        col.includes('item-name') || col.includes('item name') || col.includes('product name') || col === 'title'
+                    );
+                    if (nameColIndex !== -1) {
+                        dataStartRow = row + 1; 
+                        break;
+                    }
+                }
+                
+                if (nameColIndex !== -1 && dataStartRow < lines.length) {
+                    let validItemNames = [];
+                    for (let row = dataStartRow; row < lines.length; row++) {
+                        const dataCols = lines[row].split('\t');
+                        if (dataCols.length > nameColIndex && dataCols[nameColIndex].trim() !== '') {
+                            validItemNames.push(dataCols[nameColIndex].trim());
                         }
                     }
                     
-                    if (nameColIndex !== -1 && dataStartRow < lines.length) {
-                        for (let row = dataStartRow; row < lines.length; row++) {
-                            const dataCols = lines[row].split('\t');
-                            if (dataCols.length > nameColIndex && dataCols[nameColIndex].trim() !== '') {
-                                const fullItemName = dataCols[nameColIndex].trim();
-                                extractedBrand = fullItemName.split(/\s+/)[0].replace(/[^a-zA-Z0-9-]/g, ''); 
+                    if (validItemNames.length > 0) {
+                        const middleIndex = Math.floor(validItemNames.length / 2);
+                        const middleItemName = validItemNames[middleIndex];
+                        const lowerItemName = middleItemName.toLowerCase();
+                        
+                        let matchedBrand = "";
+                        
+                        // 1. Check against Master List first
+                        for (let brand of KNOWN_BRANDS) {
+                            if (lowerItemName.includes(brand.toLowerCase())) {
+                                matchedBrand = brand;
                                 break;
                             }
                         }
+                        
+                        // 2. Apply Result (List Match OR Fallback to 1st Word)
+                        if (matchedBrand !== "") {
+                            extractedBrand = matchedBrand;
+                        } else {
+                            extractedBrand = middleItemName.split(/\s+/)[0].replace(/[^a-zA-Z0-9-]/g, ''); 
+                        }
                     }
-                } catch (error) {
-                    console.error("Error auto-extracting brand:", file.name, error);
                 }
-                
-                selectedFiles.push({ file: file, brand: extractedBrand });
+            } catch (error) {
+                console.error("Error auto-extracting brand:", error);
+            }
+            return extractedBrand;
+        }
+
+        // --- AUTO EXTRACTION LOGIC (SUPPORTS TXT AND ZIP) ---
+        async function handleFiles(files) {
+            const filesArray = Array.from(files);
+            statusLog.innerHTML = `<svg class="animate-spin inline -ml-1 mr-2 h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Scanning files...`;
+
+            for (let i = 0; i < filesArray.length; i++) {
+                const file = filesArray[i];
+
+                if (file.name.toLowerCase().endsWith('.zip')) {
+                    if (typeof JSZip !== 'undefined') {
+                        const zip = new JSZip();
+                        try {
+                            const zipContent = await zip.loadAsync(file);
+                            for (const relativePath in zipContent.files) {
+                                const zipEntry = zipContent.files[relativePath];
+                                if (!zipEntry.dir && relativePath.toLowerCase().endsWith('.txt')) {
+                                    const text = await zipEntry.async("text");
+                                    const mockFile = new File([text], relativePath.split('/').pop(), { type: 'text/plain' });
+                                    const brand = await extractBrand(text);
+                                    selectedFiles.push({ file: mockFile, brand: brand });
+                                }
+                            }
+                        } catch (error) {
+                            console.error("Error unzipping file:", error);
+                        }
+                    }
+                } else if (file.name.toLowerCase().endsWith('.txt')) {
+                    const text = await file.text();
+                    const brand = await extractBrand(text);
+                    selectedFiles.push({ file: file, brand: brand });
+                }
             }
             
             renderFileList();
@@ -255,7 +312,44 @@
             fileInput.value = ''; 
         });
 
-        // --- DRAG AND DROP HANDLING ---
+        // --- DRAG AND DROP DIRECTORY HANDLING ---
+        async function getFilesFromDataTransfer(items) {
+            let files = [];
+            const readEntry = async (entry) => {
+                if (entry.isFile) {
+                    return new Promise((resolve) => {
+                        entry.file(f => {
+                            if (f.name.toLowerCase().endsWith('.txt') || f.name.toLowerCase().endsWith('.zip')) {
+                                files.push(f);
+                            }
+                            resolve();
+                        });
+                    });
+                } else if (entry.isDirectory) {
+                    const dirReader = entry.createReader();
+                    return new Promise((resolve) => {
+                        const readAll = () => {
+                            dirReader.readEntries(async (entries) => {
+                                if (entries.length === 0) {
+                                    resolve();
+                                } else {
+                                    for (let e of entries) await readEntry(e);
+                                    readAll(); 
+                                }
+                            });
+                        };
+                        readAll();
+                    });
+                }
+            };
+
+            for (let i = 0; i < items.length; i++) {
+                const entry = items[i].webkitGetAsEntry();
+                if (entry) await readEntry(entry);
+            }
+            return files;
+        }
+
         dropZone.addEventListener('dragenter', (e) => {
             e.preventDefault(); e.stopPropagation();
             dropZone.classList.add('border-indigo-400', 'bg-indigo-50/80', 'scale-[1.02]');
@@ -271,16 +365,24 @@
             dropZone.classList.remove('border-indigo-400', 'bg-indigo-50/80', 'scale-[1.02]');
         });
 
-        dropZone.addEventListener('drop', (e) => {
+        dropZone.addEventListener('drop', async (e) => {
             e.preventDefault(); e.stopPropagation();
             dropZone.classList.remove('border-indigo-400', 'bg-indigo-50/80', 'scale-[1.02]');
             
-            if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+            if (e.dataTransfer && e.dataTransfer.items) {
+                statusLog.innerHTML = `<svg class="animate-spin inline -ml-1 mr-2 h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Scanning dropped folders...`;
+                const files = await getFilesFromDataTransfer(e.dataTransfer.items);
+                if (files.length > 0) {
+                    await handleFiles(files);
+                } else {
+                    statusLog.textContent = 'No .txt or .zip files found in dropped items.';
+                    setTimeout(() => statusLog.textContent = '', 3000);
+                }
+            } else if (e.dataTransfer && e.dataTransfer.files.length > 0) {
                 handleFiles(e.dataTransfer.files);
             }
         });
 
-        // --- CONVERSION LOGIC & COLUMN FIXING ---
         function getFormattedTime() {
             const now = new Date();
             const estDate = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
@@ -295,7 +397,6 @@
         }
 
         convertBtn.addEventListener('click', async () => {
-            // Validation
             let allFilled = true;
             for (let i = 0; i < selectedFiles.length; i++) {
                 const input = document.getElementById(`brand-${i}`);
@@ -317,9 +418,6 @@
 
             try {
                 if (currentMode === 'individual') {
-                    // ==============================
-                    // INDIVIDUAL MODE LOGIC
-                    // ==============================
                     let processedCount = 0;
 
                     for (let i = 0; i < selectedFiles.length; i++) {
@@ -329,6 +427,7 @@
                         
                         const workbook = new ExcelJS.Workbook();
                         const worksheet = workbook.addWorksheet('Listings');
+                        
                         worksheet.views = [{ state: 'frozen', ySplit: 1 }];
 
                         const text = await file.text();
@@ -348,6 +447,7 @@
                                     if (lowerLine.includes('item-name') || lowerLine.includes('seller-sku')) {
                                         isHeaderFound = true;
                                         const originalHeaders = rowData;
+
                                         skuOriginalIndex = originalHeaders.findIndex(h => h.toLowerCase() === 'seller-sku');
 
                                         const sortedHeaders = [...originalHeaders].sort((a, b) => {
@@ -369,7 +469,7 @@
                                     const reorderedData = headerMapping.map((oldIndex, newIndex) => {
                                         let val = rowData[oldIndex] !== undefined ? rowData[oldIndex] : "";
                                         let colName = masterColumnLayout[newIndex];
-                                        
+
                                         if (colName === 'seller-sku') {
                                             return String(val);
                                         }
@@ -383,8 +483,8 @@
                                     row.eachCell((cell, colNumber) => { 
                                         cell.font = { name: 'Calibri', size: 11 }; 
                                         if (masterColumnLayout[colNumber - 1] === 'seller-sku') {
-                                            cell.numFmt = '@';
-                                        } 
+                                            cell.numFmt = '@'; 
+                                        }
                                     });
                                 }
                             }
@@ -412,9 +512,6 @@
                     statusLog.innerHTML = `🎉 Successfully downloaded ${processedCount} separate file(s)!`;
 
                 } else {
-                    // ==============================
-                    // MERGE MODE LOGIC
-                    // ==============================
                     let masterSkuCount = 0;
                     const workbook = new ExcelJS.Workbook();
 
@@ -432,6 +529,7 @@
                         }
 
                         const worksheet = workbook.addWorksheet(safeTabName);
+                        
                         worksheet.views = [{ state: 'frozen', ySplit: 1 }];
 
                         const text = await file.text();
@@ -450,6 +548,7 @@
                                     if (lowerLine.includes('item-name') || lowerLine.includes('seller-sku')) {
                                         isHeaderFound = true;
                                         const originalHeaders = rowData;
+
                                         skuOriginalIndex = originalHeaders.findIndex(h => h.toLowerCase() === 'seller-sku');
 
                                         const sortedHeaders = [...originalHeaders].sort((a, b) => {
@@ -471,7 +570,7 @@
                                     const reorderedData = headerMapping.map((oldIndex, newIndex) => {
                                         let val = rowData[oldIndex] !== undefined ? rowData[oldIndex] : "";
                                         let colName = masterColumnLayout[newIndex];
-                                        
+
                                         if (colName === 'seller-sku') {
                                             return String(val);
                                         }
@@ -485,8 +584,8 @@
                                     row.eachCell((cell, colNumber) => { 
                                         cell.font = { name: 'Calibri', size: 11 }; 
                                         if (masterColumnLayout[colNumber - 1] === 'seller-sku') {
-                                            cell.numFmt = '@';
-                                        } 
+                                            cell.numFmt = '@'; 
+                                        }
                                     });
                                 }
                             }
@@ -515,7 +614,6 @@
                 console.error("Error processing files:", error);
                 alert("An error occurred while building the Excel file. Please check the console.");
             } finally {
-                // Restore button state
                 convertBtn.innerHTML = originalBtnHTML;
                 convertBtn.disabled = false;
                 setTimeout(() => { statusLog.innerHTML = ''; }, 6000);

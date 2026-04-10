@@ -128,7 +128,7 @@
             "status", "minimum-seller-allowed-price", "maximum-seller-allowed-price"
         ];
 
-        // --- MASTER BRAND LIST ---
+        // --- MASTER BRAND LIST & CUSTOM OVERRIDES ---
         const KNOWN_BRANDS = [
             "Evenflo", "Wonderfold", "Cole Haan", "Invirox", "Boppy", 
             "Arm's Reach", "Arm’s Reach", "Arms Reach", "Vertx", "Sebago", 
@@ -136,8 +136,18 @@
             "USCAPE", "Safetyshirtz", "Superga", "Scientific Anglers", 
             "Tru - Spec", "Tru-Spec", "Hultafors - HGNA", "Hultafors", 
             "Groundies", "Bumbleride", "Hootenanny Games", "Shurhold", 
-            "Turtle Fur", "Riedell", "Cloud Nine Sheepskin", "Wohali", 
-            "Walker & Hawkes", "Dinair", "Trenditions"
+            "Turtle Fur", "Riedell", "Cloud Nine Sheepskin", "Cloud Nine", "Wohali", 
+            "Walker & Hawkes", "Walker and Hawkes", "Dinair", "Trenditions"
+        ];
+
+        const CUSTOM_MAPPINGS = [
+            { trigger: "disco", brand: "Hootenanny Games" },
+            { trigger: "hootenanny", brand: "Hootenanny Games" },
+            { trigger: "walker", brand: "Walker & Hawkes" },
+            { trigger: "dual", brand: "Fieldsheer" },
+            { trigger: "snickers workwear", brand: "Hultafors" },
+            { trigger: "cloud", brand: "Cloud Nine" },
+            { trigger: "moon boot", brand: "Moon Boots" }
         ];
 
         // --- MODE TOGGLE LOGIC ---
@@ -213,7 +223,7 @@
             renderFileList();
         };
 
-        // Helper function to extract Brand from text content using Master List
+        // Helper function to extract Brand from text content
         async function extractBrand(text) {
             let extractedBrand = '';
             try {
@@ -248,15 +258,25 @@
                         
                         let matchedBrand = "";
                         
-                        // 1. Check against Master List first
-                        for (let brand of KNOWN_BRANDS) {
-                            if (lowerItemName.includes(brand.toLowerCase())) {
-                                matchedBrand = brand;
+                        // 1. Check Custom Keyword Mappings (e.g. "disco" -> "Hootenanny Games")
+                        for (let mapping of CUSTOM_MAPPINGS) {
+                            if (lowerItemName.includes(mapping.trigger)) {
+                                matchedBrand = mapping.brand;
                                 break;
                             }
                         }
                         
-                        // 2. Apply Result (List Match OR Fallback to 1st Word)
+                        // 2. Check Master Brand List if no custom mapping found
+                        if (matchedBrand === "") {
+                            for (let brand of KNOWN_BRANDS) {
+                                if (lowerItemName.includes(brand.toLowerCase())) {
+                                    matchedBrand = brand;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // 3. Fallback to 1st Word if still no match
                         if (matchedBrand !== "") {
                             extractedBrand = matchedBrand;
                         } else {
@@ -315,6 +335,14 @@
         // --- DRAG AND DROP DIRECTORY HANDLING ---
         async function getFilesFromDataTransfer(items) {
             let files = [];
+            
+            // CRITICAL FIX: Extract all entries synchronously before the browser wipes memory
+            let entries = [];
+            for (let i = 0; i < items.length; i++) {
+                const entry = items[i].webkitGetAsEntry();
+                if (entry) entries.push(entry);
+            }
+
             const readEntry = async (entry) => {
                 if (entry.isFile) {
                     return new Promise((resolve) => {
@@ -329,11 +357,11 @@
                     const dirReader = entry.createReader();
                     return new Promise((resolve) => {
                         const readAll = () => {
-                            dirReader.readEntries(async (entries) => {
-                                if (entries.length === 0) {
+                            dirReader.readEntries(async (dirEntries) => {
+                                if (dirEntries.length === 0) {
                                     resolve();
                                 } else {
-                                    for (let e of entries) await readEntry(e);
+                                    for (let e of dirEntries) await readEntry(e);
                                     readAll(); 
                                 }
                             });
@@ -343,10 +371,11 @@
                 }
             };
 
-            for (let i = 0; i < items.length; i++) {
-                const entry = items[i].webkitGetAsEntry();
-                if (entry) await readEntry(entry);
+            // Process the safely extracted entries
+            for (let entry of entries) {
+                await readEntry(entry);
             }
+            
             return files;
         }
 
@@ -571,7 +600,7 @@
                                         let val = rowData[oldIndex] !== undefined ? rowData[oldIndex] : "";
                                         let colName = masterColumnLayout[newIndex];
 
-                                        if (colName === 'seller-sku') {
+                                        if (colName === 'seller-sku' || colName === 'asin1' || colName === 'product-id' || colName === 'listing-id') {
                                             return String(val);
                                         }
                                         if (val !== "" && !isNaN(val)) {
